@@ -1,4 +1,5 @@
-﻿using BepInEx;
+using Steamworks.Data;
+using BepInEx;
 using BepInEx.Logging;
 using BepInEx.Configuration;
 using HarmonyLib;
@@ -53,12 +54,12 @@ internal sealed class RepoCustomPhotonServer : BaseUnityPlugin
         {
             if (appID)
             {
-                MenuManager.instance.PagePopUp("Invalid AppID", Color.red,
+                MenuManager.instance.PagePopUp("Invalid AppID", UnityEngine.Color.red,
                 "Invalid AppIdVoice format. It must be in the format of a Guid (e.g., h26742gw-96e2-4c18-93c4-978176705b0c).","OK.", false);
             }
             else
             {
-                MenuManager.instance.PagePopUp("Invalid AppID", Color.red,
+                MenuManager.instance.PagePopUp("Invalid AppID", UnityEngine.Color.red,
                     "Invalid AppIdRealtime format. It must be in the format of a Guid (e.g., h26742gw-96e2-4c18-93c4-978176705b0c).","OK.", false);
             }
             return false;
@@ -203,7 +204,7 @@ internal sealed class RepoCustomPhotonServer : BaseUnityPlugin
 
                         }));
 
-                        MenuManager.instance.PagePopUpTwoOptions(menuButtonPopup, "Select the appid type", Color.yellow, "Please select the AppID type", "Realtime", "Voice", false);
+                        MenuManager.instance.PagePopUpTwoOptions(menuButtonPopup, "Select the appid type", UnityEngine.Color.yellow, "Please select the AppID type", "Realtime", "Voice", false);
                         return;
                     }
                 }, player_btn.transform);
@@ -218,7 +219,9 @@ internal sealed class RepoCustomPhotonServer : BaseUnityPlugin
     private static string GetSteamAuthTicket(out AuthTicket ticket)
     {
         logger.LogInfo("Getting Steam Auth Ticket...");
-        ticket = SteamUser.GetAuthSessionTicket();
+        // Assuming a default NetIdentity is required, create one. Replace this with the correct identity if needed.
+        NetIdentity identity = new NetIdentity(); // Ensure this is the correct way to initialize NetIdentity in your context.
+        ticket = SteamUser.GetAuthSessionTicket(identity);
         System.Text.StringBuilder stringBuilder = new System.Text.StringBuilder();
 
         for (int i = 0; i < ticket.Data.Length; i++)
@@ -237,9 +240,11 @@ internal sealed class RepoCustomPhotonServer : BaseUnityPlugin
         {
             serverSettings.AppSettings.AppIdRealtime = Instance.AppIdRealtime.Value;
             serverSettings.AppSettings.AppIdVoice = Instance.AppIdVoice.Value;
+            
 
-            logger.LogDebug($"AppIdRealtime: {serverSettings.AppSettings.AppIdRealtime}");
-            logger.LogDebug($"AppIdVoice: {serverSettings.AppSettings.AppIdVoice}");
+            logger.LogInfo($"AppIdRealtime: {serverSettings.AppSettings.AppIdRealtime}");
+            logger.LogInfo($"AppIdVoice: {serverSettings.AppSettings.AppIdVoice}");
+            logger.LogInfo($"FixedRegion: {serverSettings.AppSettings.FixedRegion}");
 
             PhotonNetwork.ConnectUsingSettings();
         }
@@ -247,13 +252,16 @@ internal sealed class RepoCustomPhotonServer : BaseUnityPlugin
 
     private static void UpdateAuthMethod()
     {
-        PhotonNetwork.AuthValues = new AuthenticationValues();
-        PhotonNetwork.AuthValues.UserId = SteamClient.SteamId.ToString();
-        PhotonNetwork.AuthValues.AuthType = CustomAuthenticationType.None;
-
+        PhotonNetwork.AuthValues = new AuthenticationValues
+        {
+            UserId = SteamClient.SteamId.ToString(),
+            AuthType = (CustomAuthenticationType)255 // Explicitly cast the integer to CustomAuthenticationType
+        };
         string value = GetSteamAuthTicket(out steamAuthTicket);
-        logger.LogDebug($"SteamAuthTicket: {value}");
         PhotonNetwork.AuthValues.AddAuthParameter("ticket", value);
+
+        logger.LogDebug($"SteamAuthTicket: {value}");
+
     }
 
     [HarmonyPatch(typeof(NetworkConnect))]
@@ -310,7 +318,7 @@ internal sealed class RepoCustomPhotonServer : BaseUnityPlugin
                 UpdateAuthMethod();
             }
         }
-
+        //DataDirector.PhotonSetAppId
         [HarmonyPatch("SendSteamAuthTicket")]
         [HarmonyPrefix]
         public static bool SendSteamAuthTicket_Prefix()
@@ -323,6 +331,22 @@ internal sealed class RepoCustomPhotonServer : BaseUnityPlugin
             }
 
             return true;
+        }
+
+        [HarmonyPatch(typeof(SteamManager), "SendSteamAuthTicket")]
+        public class SendSteamAuthTicketPatch
+        {
+            // Token: 0x0600000F RID: 15 RVA: 0x00002B93 File Offset: 0x00000D93
+            [HarmonyPrefix]
+            public static bool Prefix()
+            {
+                if (Instance.isActive.Value)
+                {
+                    logger.LogInfo("Updating Photon Settings");
+                    UpdatePhotonSettings();
+                }
+                return false;
+            }
         }
     }
 }
